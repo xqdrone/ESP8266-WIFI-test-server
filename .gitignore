@@ -1,0 +1,6 @@
+target/
+__pycache__/
+*.pyc
+esp8266-console.properties
+.idea/
+*.iml

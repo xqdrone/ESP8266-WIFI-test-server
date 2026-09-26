@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP8266 WiFi / TCP 测试台</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2331;
+    --border: #2b3444;
+    --text: #e6edf3;
+    --muted: #8b98a9;
+    --accent: #4493f8;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Cascadia Mono", "Microsoft YaHei Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Microsoft YaHei", -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  button { font-family: inherit; font-size: inherit; cursor: pointer; }
+  input, select { font-family: inherit; font-size: inherit; }
+
+  /* ---------------- 顶栏 ---------------- */
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex: 0 0 auto;
+  }
+  .brand { font-size: 16px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; }
+  .brand span { color: var(--accent); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-size: 12.5px; white-space: nowrap;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.on  { background: var(--ok); box-shadow: 0 0 8px rgba(63,185,80,.85); }
+  .dot.off { background: var(--err); box-shadow: 0 0 8px rgba(248,81,73,.6); }
+  .dot.idle{ background: var(--warn); }
+  .pill b { font-weight: 600; }
+  .pill code { font-family: var(--mono); color: #9fe8ff; }
+  .pill-btn { color: inherit; font-family: inherit; cursor: pointer; }
+  .pill-btn:hover { border-color: var(--accent); color: #cfe6ff; }
+  .pill-btn .caret { font-size: 10px; color: var(--muted); }
+  .spacer { flex: 1 1 auto; }
+  .target-wrap { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  select, input[type=text], input[type=number] {
+    background: #0b1017; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 9px; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+
+  /* ---------------- 主体 ---------------- */
+  main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .left {
+    width: 42%; min-width: 330px; max-width: 640px;
+    display: flex; flex-direction: column; min-height: 0;
+    border-right: 1px solid var(--border);
+  }
+  .right { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  .sec-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; border-bottom: 1px solid var(--border);
+    background: #12171f; flex: 0 0 auto;
+  }
+  .sec-head h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .5px; }
+  .btn-sm {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 4px 10px; font-size: 12px;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: #cfe6ff; }
+
+  .devices { padding: 10px 12px; overflow-y: auto; flex: 0 0 auto; max-height: 42%; }
+  .device {
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--ok);
+    border-radius: 9px; padding: 10px 12px; margin-bottom: 9px;
+  }
+  .device.stale { border-left-color: var(--warn); }
+  .device .row1 { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .device .devid { font-family: var(--mono); font-weight: 700; color: #9fe8ff; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(63,185,80,.15); color: var(--ok); border: 1px solid rgba(63,185,80,.4);
+  }
+  .badge.stale { background: rgba(210,153,34,.15); color: var(--warn); border-color: rgba(210,153,34,.4); }
+  .device .meta {
+    margin-top: 7px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 4px 14px; font-size: 12px; color: var(--muted);
+  }
+  .device .meta b { color: var(--text); font-weight: 600; font-family: var(--mono); }
+  .empty { color: var(--muted); font-size: 13px; padding: 14px 4px; line-height: 1.7; }
+
+  .logbox { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--border); }
+  .log {
+    flex: 1 1 auto; overflow-y: auto; padding: 8px 12px 14px;
+    font-family: var(--mono); font-size: 12.3px; line-height: 1.65;
+  }
+  .log .line { display: flex; gap: 8px; padding: 1px 0; word-break: break-all; }
+  .log .t { color: #5d6b7d; flex: 0 0 auto; }
+  .log .arrow { flex: 0 0 auto; font-weight: 700; }
+  .log .rx .arrow { color: var(--ok); }
+  .log .tx .arrow { color: var(--accent); }
+  .log .sys .arrow { color: var(--warn); }
+  .log .err .arrow { color: var(--err); }
+  .log .who { color: #7d8ea3; flex: 0 0 auto; }
+  .log .body { color: var(--text); white-space: pre-wrap; }
+  .log .sys .body, .log .err .body { color: #ffd9a0; }
+  .log .err .body { color: #ffb3ae; }
+
+  /* ---------------- 按钮区 ---------------- */
+  .grid-wrap { flex: 1 1 auto; overflow-y: auto; padding: 14px; min-height: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 11px; }
+  .tile {
+    position: relative; min-height: 84px; border-radius: 11px; border: 1px solid var(--border);
+    background: var(--panel); display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 6px; padding: 12px 12px 10px; transition: transform .07s, filter .15s;
+    overflow: hidden;
+  }
+  .tile:hover { filter: brightness(1.22); }
+  .tile:active { transform: scale(.965); }
+  .tile .label { font-size: 15px; font-weight: 600; text-align: center; line-height: 1.3; }
+  .tile .payload {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    background: rgba(0,0,0,.28); padding: 1px 7px; border-radius: 5px;
+  }
+  .tile .edit {
+    position: absolute; top: 5px; right: 5px; opacity: 0; transition: opacity .15s;
+    background: rgba(0,0,0,.5); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; width: 23px; height: 22px; line-height: 1; font-size: 12px; padding: 0;
+  }
+  .tile:hover .edit { opacity: 1; }
+  .tile.sent { animation: flash .38s ease; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 0 rgba(68,147,248,.85); } 100% { box-shadow: 0 0 0 12px rgba(68,147,248,0); } }
+  .tile.add {
+    border-style: dashed; color: var(--muted); background: transparent; font-size: 13px;
+  }
+  .tile.add:hover { color: var(--accent); border-color: var(--accent); }
+
+  .composer {
+    flex: 0 0 auto; border-top: 1px solid var(--border); padding: 10px 14px;
+    display: flex; gap: 9px; align-items: center; background: #12171f;
+  }
+  .composer input { flex: 1 1 auto; font-family: var(--mono); }
+  .btn-primary {
+    background: var(--accent); color: #fff; border: 1px solid var(--accent);
+    border-radius: 8px; padding: 7px 16px; font-weight: 600; white-space: nowrap;
+  }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ---------------- 弹窗 ---------------- */
+  .mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.62);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .mask.show { display: flex; }
+  .dialog {
+    width: 420px; max-width: 92vw; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 13px; padding: 20px 22px; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+  }
+  .dialog h3 { margin: 0 0 16px; font-size: 15px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .field input { width: 100%; }
+  .field .hint { font-size: 11px; color: #6b7a8d; margin-top: 4px; }
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+  .swatch.sel { border-color: #fff; }
+  .dialog .actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 18px; }
+  .btn-danger { background: transparent; color: var(--err); border: 1px solid rgba(248,81,73,.5); border-radius: 8px; padding: 7px 14px; }
+  .btn-danger:hover { background: rgba(248,81,73,.12); }
+  .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; }
+
+  .popover {
+    position: absolute; z-index: 70; min-width: 300px; display: none;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 11px;
+    padding: 8px; box-shadow: 0 14px 38px rgba(0,0,0,.6);
+  }
+  .popover.show { display: block; }
+  .popover .pop-title {
+    font-size: 11.5px; color: var(--muted); padding: 4px 8px 7px;
+    border-bottom: 1px solid var(--border); margin-bottom: 5px;
+  }
+  .pop-item {
+    width: 100%; display: flex; align-items: center; gap: 9px; text-align: left;
+    background: transparent; border: 1px solid transparent; color: var(--text);
+    border-radius: 8px; padding: 8px 9px; font-family: var(--mono); font-size: 12.5px;
+  }
+  .pop-item:hover { background: var(--panel-2); border-color: var(--border); }
+  .pop-item.sel { border-color: var(--accent); background: rgba(68,147,248,.12); }
+  .pop-item .tick { width: 14px; color: var(--accent); flex: 0 0 auto; }
+  .pop-item .name { flex: 0 0 auto; font-weight: 600; }
+  .pop-item .bytes { flex: 1 1 auto; text-align: right; color: var(--muted); font-size: 11.5px; }
+  .pop-item .rec {
+    flex: 0 0 auto; font-size: 10.5px; padding: 1px 6px; border-radius: 999px;
+    background: rgba(210,153,34,.16); color: var(--warn); border: 1px solid rgba(210,153,34,.4);
+  }
+  .pop-foot {
+    border-top: 1px solid var(--border); margin-top: 5px; padding: 7px 8px 2px;
+    font-size: 11px; color: #6b7a8d; line-height: 1.6;
+  }
+
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #21262d; border: 1px solid var(--border); color: var(--text);
+    padding: 9px 18px; border-radius: 9px; opacity: 0; transition: all .22s; z-index: 80; pointer-events: none;
+    box-shadow: 0 10px 28px rgba(0,0,0,.5); font-size: 13px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.warn { border-color: rgba(210,153,34,.6); }
+  .toast.err { border-color: rgba(248,81,73,.6); }
+
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: #303a49; border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3d4a5c; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">ESP8266 <span>WiFi / TCP 测试台</span></div>
+
+  <div class="pill"><span class="dot" id="serverDot"></span><b id="serverText">连接服务端中…</b></div>
+  <div class="pill">单片机接入 <code id="tcpAddr">-</code>
+    <button class="btn-sm" id="copyAddr" style="padding:2px 8px">复制</button>
+  </div>
+  <div class="pill">在线设备 <b id="devCount">0</b></div>
+  <button class="pill pill-btn" id="charsetBtn"
+          title="点击切换向单片机发送中文时使用的编码。串口显示乱码时选 GBK。切换立即生效并自动保存。">
+    下发编码 <b id="charsetText">-</b> <span class="caret">▾</span>
+  </button>
+
+  <div class="spacer"></div>
+
+  <div class="target-wrap">
+    <span>下发目标</span>
+    <select id="targetSel"><option value="all">全部在线设备（广播）</option></select>
+  </div>
+</header>
+
+<main>
+  <section class="left">
+    <div class="sec-head">
+      <h2>设备 / 连接状态</h2>
+      <div class="spacer"></div>
+      <span class="pill" style="padding:2px 9px;font-size:11.5px">心跳超时 <b id="hbText">-</b></span>
+    </div>
+    <div class="devices" id="devices"></div>
+
+    <div class="logbox">
+      <div class="sec-head">
+        <h2>数据日志</h2>
+        <div class="spacer"></div>
+        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="autoScroll" checked style="width:auto"> 自动滚动
+        </label>
+        <button class="btn-sm" id="clearLog">清空</button>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <section class="right">
+    <div class="sec-head">
+      <h2>控制按钮（点击即发送，右上角 ✎ 可编辑）</h2>
+      <div class="spacer"></div>
+      <button class="btn-sm" id="addBtn">+ 新增按钮</button>
+      <button class="btn-sm" id="resetBtn">恢复默认</button>
+    </div>
+    <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+
+    <div class="composer">
+      <input type="text" id="customData" placeholder='自定义发送内容，例如 LED_ON 或 {"cmd":"led","value":1}'>
+      <button class="btn-primary" id="sendCustom">发送</button>
+    </div>
+  </section>
+</main>
+
+<div class="mask" id="mask">
+  <div class="dialog">
+    <h3 id="dlgTitle">编辑按钮</h3>
+    <div class="field">
+      <label>按钮名称</label>
+      <input type="text" id="fLabel" maxlength="40" placeholder="例如：点亮 LED">
+    </div>
+    <div class="field">
+      <label>发送数据（点击按钮时原样下发给单片机）</label>
+      <input type="text" id="fData" maxlength="200" placeholder="例如：LED_ON">
+      <div class="hint">服务端会在末尾自动补上 CRLF，单片机用 readStringUntil('\n') 即可整行读取。</div>
+    </div>
+    <div class="field">
+      <label>颜色</label>
+      <div class="swatches" id="swatches"></div>
+    </div>
+    <div class="actions">
+      <button class="btn-danger" id="dlgDelete">删除</button>
+      <div class="spacer"></div>
+      <button class="btn-ghost" id="dlgCancel">取消</button>
+      <button class="btn-primary" id="dlgSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="popover" id="charsetPop"></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================================================================
+   状态
+   ================================================================ */
+const COLOR_OPTIONS = ['#4493f8', '#3fb950', '#d29922', '#f85149', '#a371f7', '#2dd4bf', '#e879f9', '#64748b'];
+const STORAGE_KEY = 'esp8266-console-buttons-v1';
+const TARGET_KEY = 'esp8266-console-target-v1';
+
+const DEFAULT_BUTTONS = [
+  { id: 'b1', label: '点亮 LED',  data: 'LED_ON',   color: '#3fb950' },
+  { id: 'b2', label: '熄灭 LED',  data: 'LED_OFF',  color: '#64748b' },
+  { id: 'b3', label: '查询状态',  data: 'STATUS?',  color: '#4493f8' },
+  { id: 'b4', label: '蜂鸣器响',  data: 'BEEP_ON',  color: '#d29922' },
+  { id: 'b5', label: '蜂鸣器停',  data: 'BEEP_OFF', color: '#64748b' },
+  { id: 'b6', label: '重启设备',  data: 'RESET',    color: '#f85149' }
+];
+
+let buttons = loadButtons();
+let editingId = null;
+let pendingColor = COLOR_OPTIONS[0];
+let ws = null;
+let reconnectTimer = null;
+let reconnectDelay = 800;
+let latestState = null;
+let lastStateAt = 0;
+let serverOnline = false;
+let toastTimer = null;
+
+/* ================================================================
+   工具函数
+   ================================================================ */
+const $ = id => document.getElementById(id);
+
+function loadButtons() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_BUTTONS.slice();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(b => b && typeof b.data === 'string')
+                   .map((b, i) => ({
+                     id: b.id || ('b' + Date.now() + i),
+                     label: b.label || b.data,
+                     data: b.data,
+                     color: b.color || COLOR_OPTIONS[0]
+                   }));
+    }
+  } catch (e) { /* 配置损坏时回退默认值 */ }
+  return DEFAULT_BUTTONS.slice();
+}
+
+function saveButtons() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buttons)); } catch (e) { /* 忽略 */ }
+}
+
+function nowText(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function humanDuration(seconds) {
+  if (seconds < 60) return seconds + ' 秒';
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  if (m < 60) return m + ' 分 ' + s + ' 秒';
+  return Math.floor(m / 60) + ' 时 ' + (m % 60) + ' 分';
+}
+
+function showToast(text, level) {
+  const el = $('toast');
+  el.textContent = text;
+  el.className = 'toast show' + (level ? ' ' + level : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast' + (level ? ' ' + level : ''); }, 2400);
+}
+
+/* ================================================================
+   数据日志
+   ================================================================ */
+function appendLog(kind, who, body) {
+  const log = $('log');
+  const line = document.createElement('div');
+  line.className = 'line ' + kind;
+  const arrow = kind === 'rx' ? '←' : (kind === 'tx' ? '→' : '•');
+  line.innerHTML = '<span class="t"></span><span class="arrow"></span><span class="who"></span><span class="body"></span>';
+  line.querySelector('.t').textContent = nowText();
+  line.querySelector('.arrow').textContent = arrow;
+  line.querySelector('.who').textContent = who ? ('[' + who + ']') : '';
+  line.querySelector('.body').textContent = body;
+  log.appendChild(line);
+  const max = (latestState && latestState.maxWorkLogLines) || 500;
+  while (log.childElementCount > max) log.removeChild(log.firstChild);
+  if ($('autoScroll').checked) log.scrollTop = log.scrollHeight;
+}
+
+/* ================================================================
+   WebSocket
+   ================================================================ */
+function connect() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  setServerStatus(false, '连接服务端中…');
+  try {
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = function () {
+    reconnectDelay = 800;
+    setServerStatus(true, '服务端已连接');
+  };
+  ws.onmessage = function (evt) {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch (e) { return; }
+    handleMessage(msg);
+  };
+  ws.onclose = function () {
+    setServerStatus(false, '服务端已断开');
+    scheduleReconnect();
+  };
+  ws.onerror = function () { /* onclose 会接手 */ };
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 1.6, 6000);
+}
+
+function setServerStatus(online, text) {
+  serverOnline = online;
+  $('serverDot').className = 'dot ' + (online ? 'on' : 'off');
+  $('serverText').textContent = text;
+  $('sendCustom').disabled = !online;
+}
+
+function wsSend(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('服务端未连接，无法发送', 'err');
+    return false;
+  }
+  ws.send(JSON.stringify(obj));
+  return true;
+}
+
+function handleMessage(msg) {
+  if (msg.type === 'state') {
+    latestState = msg.payload;
+    lastStateAt = msg.at;
+    renderState(msg.payload);
+  } else if (msg.type === 'device-message') {
+    const p = msg.payload;
+    appendLog('rx', p.deviceId, p.data);
+  } else if (msg.type === 'device-offline') {
+    appendLog('sys', p.deviceId, '设备离线：' + p.reason);
+  } else if (msg.type === 'charset-changed') {
+    const p = msg.payload;
+    appendLog('sys', '编码', '下发编码已切换：' + p.previous + ' -> ' + p.charset
+      + '（' + p.source + '，已保存）');
+    showToast('下发编码已切换为 ' + p.charset, 'info');
+  } else if (msg.type === 'notice') {
+    const p = msg.payload;
+    const kind = p.level === 'error' ? 'err' : (p.level === 'sent' ? 'tx' : 'sys');
+    appendLog(kind, '界面', p.text);
+    if (p.level === 'error' || p.level === 'warn') showToast(p.text, p.level);
+  }
+}
+
+/* ================================================================
+   渲染
+   ================================================================ */
+function renderState(state) {
+  // 顶栏：单片机接入地址
+  const addrs = state.serverAddresses || [];
+  const primary = addrs.length ? addrs[0] : '<本机IP>';
+  $('tcpAddr').textContent = primary + ':' + state.tcpPort;
+  $('hbText').textContent = Math.round((state.heartbeatTimeoutMillis || 0) / 1000) + 's';
+  $('devCount').textContent = state.deviceCount;
+
+  // 下发编码：不是 UTF-8 时高亮，提醒这是“为串口/字库适配过”的状态
+  const cs = state.sendCharset || 'UTF-8';
+  const csChanged = (cs !== 'UTF-8');
+  $('charsetText').textContent = cs;
+  $('charsetBtn').style.borderColor = csChanged ? 'var(--warn)' : 'var(--border)';
+  $('charsetBtn').style.color = csChanged ? '#ffd9a0' : '';
+  $('charsetBtn').title = '当前下发编码: ' + cs
+    + (state.charsetSource ? '（来源: ' + state.charsetSource + '）' : '')
+    + '\n点击切换。串口显示中文乱码时选 GBK。';
+
+  renderDevices(state.devices || []);
+  renderTargets(state.devices || []);
+}
+
+function renderDevices(devices) {
+  const box = $('devices');
+  const signature = devices.map(d => d.id).join(',');
+  if (signature !== renderDevices.lastSignature) {
+    renderDevices.lastSignature = signature;
+    renderDevices.nodes = {};
+    box.innerHTML = '';
+    if (!devices.length) {
+      box.innerHTML = '<div class="empty">暂无设备接入。<br>' +
+        '1. 让 ESP8266 / 单片机连接上面显示的 <b>IP:端口</b>；<br>' +
+        '2. 服务端控制台也会打印本机可用 IP；<br>' +
+        '3. 没有硬件时可用 <code>tools/device-simulator.py</code> 模拟一台设备。</div>';
+      return;
+    }
+    devices.forEach(function (d) {
+      const el = document.createElement('div');
+      el.className = 'device';
+      el.innerHTML =
+        '<div class="row1">' +
+          '<span class="devid"></span>' +
+          '<span class="badge"></span>' +
+          '<div style="flex:1 1 auto"></div>' +
+          '<button class="btn-sm act-kick">断开</button>' +
+        '</div>' +
+        '<div class="meta">' +
+          '<div>远端地址 <b class="m-remote"></b></div>' +
+          '<div>已连接 <b class="m-dur"></b></div>' +
+          '<div>收到 <b class="m-rx"></b></div>' +
+          '<div>下发 <b class="m-tx"></b></div>' +
+          '<div>最近数据 <b class="m-idle"></b></div>' +
+        '</div>';
+      el.querySelector('.devid').textContent = d.id;
+      el.querySelector('.m-remote').textContent = d.remote;
+      el.querySelector('.act-kick').onclick = function () {
+        if (confirm('确定断开 ' + d.id + ' 吗？')) {
+          wsSend({ cmd: 'disconnect', target: d.id });
+        }
+      };
+      box.appendChild(el);
+      renderDevices.nodes[d.id] = el;
+    });
+  }
+  // 只更新变化的字段，避免每 2 秒重建 DOM 造成闪烁、点击失效
+  devices.forEach(function (d) {
+    const el = renderDevices.nodes[d.id];
+    if (!el) return;
+    const stale = d.status !== 'ONLINE';
+    el.className = 'device' + (stale ? ' stale' : '');
+    const badge = el.querySelector('.badge');
+    badge.className = 'badge' + (stale ? ' stale' : '');
+    badge.textContent = stale ? '超时/离线' : '在线';
+    el.querySelector('.m-dur').textContent = humanDuration(d.connectedSeconds);
+    el.querySelector('.m-rx').textContent = d.received + ' 条';
+    el.querySelector('.m-tx').textContent = d.sent + ' 条';
+    el.querySelector('.m-idle').textContent = Math.round(d.idleMillis / 1000) + 's 前';
+  });
+}
+
+function renderTargets(devices) {
+  const sel = $('targetSel');
+  const previous = sel.value || localStorage.getItem(TARGET_KEY) || 'all';
+  sel.innerHTML = '<option value="all">全部在线设备（广播）</option>';
+  devices.forEach(function (d) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = d.id + (d.name ? '(' + d.name + ')' : '') + ' — ' + d.remote;
+    sel.appendChild(opt);
+  });
+  const stillThere = Array.from(sel.options).some(o => o.value === previous);
+  sel.value = stillThere ? previous : 'all';
+}
+
+function renderGrid() {
+  const grid = $('grid');
+  grid.innerHTML = '';
+  buttons.forEach(function (b) {
+    const tile = document.createElement('button');
+    tile.className = 'tile';
+    tile.style.borderColor = b.color;
+    tile.style.background = 'linear-gradient(180deg, ' + hexToRgba(b.color, .22) + ', ' + hexToRgba(b.color, .06) + ')';
+    tile.innerHTML = '<span class="label"></span><span class="payload"></span>' +
+                     '<span class="edit" title="编辑">✎</span>';
+    tile.querySelector('.label').textContent = b.label;
+    tile.querySelector('.payload').textContent = b.data;
+    tile.onclick = function (evt) {
+      if (evt.target.classList.contains('edit')) {
+        openDialog(b.id);
+        return;
+      }
+      pressButton(b, tile);
+    };
+    grid.appendChild(tile);
+  });
+
+  const add = document.createElement('button');
+  add.className = 'tile add';
+  add.textContent = '＋ 新增按钮';
+  add.onclick = function () { openDialog(null); };
+  grid.appendChild(add);
+}
+
+function hexToRgba(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return 'rgba(68,147,248,' + alpha + ')';
+  const n = parseInt(m[1], 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+}
+
+function pressButton(b, tile) {
+  const target = $('targetSel').value;
+  if (!wsSend({ cmd: 'send', data: b.data, target: target })) return;
+  tile.classList.remove('sent');
+  void tile.offsetWidth;
+  tile.classList.add('sent');
+  appendLog('tx', target === 'all' ? '广播' : target, b.data);
+}
+
+/* ================================================================
+   按钮编辑弹窗
+   ================================================================ */
+function renderSwatches() {
+  const box = $('swatches');
+  box.innerHTML = '';
+  COLOR_OPTIONS.forEach(function (c) {
+    const s = document.createElement('div');
+    s.className = 'swatch' + (c === pendingColor ? ' sel' : '');
+    s.style.background = c;
+    s.onclick = function () { pendingColor = c; renderSwatches(); };
+    box.appendChild(s);
+  });
+}
+
+function openDialog(id) {
+  editingId = id;
+  const b = id ? buttons.find(x => x.id === id) : null;
+  $('dlgTitle').textContent = b ? '编辑按钮' : '新增按钮';
+  $('fLabel').value = b ? b.label : '';
+  $('fData').value = b ? b.data : '';
+  pendingColor = b ? b.color : COLOR_OPTIONS[Math.floor(Math.random() * COLOR_OPTIONS.length)];
+  $('dlgDelete').style.visibility = b ? 'visible' : 'hidden';
+  renderSwatches();
+  $('mask').classList.add('show');
+  setTimeout(() => $('fLabel').focus(), 30);
+}
+
+function closeDialog() {
+  $('mask').classList.remove('show');
+  editingId = null;
+}
+
+function saveDialog() {
+  const label = $('fLabel').value.trim();
+  const data = $('fData').value.trim();
+  if (!data) { showToast('发送数据不能为空', 'warn'); return; }
+
+  if (editingId) {
+    const b = buttons.find(x => x.id === editingId);
+    if (b) { b.label = label || data; b.data = data; b.color = pendingColor; }
+  } else {
+    buttons.push({
+      id: 'b' + Date.now().toString(36),
+      label: label || data,
+      data: data,
+      color: pendingColor
+    });
+  }
+  saveButtons();
+  renderGrid();
+  closeDialog();
+  showToast('已保存', 'info');
+}
+
+function deleteDialog() {
+  if (!editingId) return;
+  buttons = buttons.filter(x => x.id !== editingId);
+  saveButtons();
+  renderGrid();
+  closeDialog();
+  showToast('已删除', 'info');
+}
+
+/* ================================================================
+   事件绑定
+   ================================================================ */
+$('sendCustom').onclick = function () {
+  const data = $('customData').value.trim();
+  if (!data) { showToast('请输入要发送的内容', 'warn'); return; }
+  const target = $('targetSel').value;
+  if (wsSend({ cmd: 'send', data: data, target: target })) {
+    appendLog('tx', target === 'all' ? '广播' : target, data);
+    $('customData').value = '';
+  }
+};
+$('customData').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') $('sendCustom').click();
+});
+
+$('targetSel').onchange = function () {
+  try { localStorage.setItem(TARGET_KEY, $('targetSel').value); } catch (e) { /* 忽略 */ }
+};
+
+$('clearLog').onclick = function () { $('log').innerHTML = ''; };
+$('addBtn').onclick = function () { openDialog(null); };
+$('resetBtn').onclick = function () {
+  if (!confirm('恢复为默认的 6 个按钮？当前自定义按钮会丢失。')) return;
+  buttons = DEFAULT_BUTTONS.slice();
+  saveButtons();
+  renderGrid();
+  showToast('已恢复默认按钮', 'info');
+};
+$('copyAddr').onclick = function () {
+  const text = $('tcpAddr').textContent;
+  navigator.clipboard.writeText(text).then(
+    () => showToast('已复制：' + text, 'info'),
+    () => showToast('复制失败，请手动选择：' + text, 'warn')
+  );
+};
+
+$('dlgSave').onclick = saveDialog;
+$('dlgCancel').onclick = closeDialog;
+$('dlgDelete').onclick = deleteDialog;
+$('mask').onclick = function (e) { if (e.target === $('mask')) closeDialog(); };
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && $('mask').classList.contains('show')) closeDialog();
+  if (e.key === 'Enter' && $('mask').classList.contains('show')) saveDialog();
+});
+
+/* ================================================================
+   下发编码切换
+   ================================================================ */
+const CHARSET_HINTS = {
+  'UTF-8':   '跨平台通用，1 个汉字 3 字节',
+  'GBK':     '中文 Windows / 串口助手默认，1 个汉字 2 字节',
+  'GB2312':  'GBK 子集，字库较小时可用',
+  'GB18030': 'GBK 超集，生僻字更全',
+  'BIG5':    '繁体中文',
+  'UTF-16LE': '双字节 Unicode',
+  'ISO-8859-1': '仅西欧字符，中文会丢'
+};
+const CHARSET_FALLBACK = ['UTF-8', 'GBK', 'GB2312', 'GB18030'];
+
+function renderCharsetPop() {
+  const pop = $('charsetPop');
+  const current = (latestState && latestState.sendCharset) || 'UTF-8';
+  const source = (latestState && latestState.charsetSource) || '';
+  let list = (latestState && latestState.availableCharsets) || [];
+  if (!list.length) list = CHARSET_FALLBACK;
+
+  pop.innerHTML = '<div class="pop-title">' +
+      '选择向单片机发送中文时使用的编码' +
+      (source ? '　·　当前来源: ' + escapeHtml(source) : '') +
+    '</div>';
+
+  list.forEach(function (name) {
+    const item = document.createElement('button');
+    const isCur = (name === current);
+    item.className = 'pop-item' + (isCur ? ' sel' : '');
+    item.innerHTML = '<span class="tick"></span><span class="name"></span>' +
+      (name === 'GBK' ? '<span class="rec">串口乱码选它</span>' : '') +
+      '<span class="bytes"></span>';
+    item.querySelector('.tick').textContent = isCur ? '✓' : '';
+    item.querySelector('.name').textContent = name;
+    // 浏览器只能按 UTF-8 计算字节数，其它编码的字节数由服务端换算后给出（见 state.charsetSamples）
+    if (isCur) {
+      const hint = (latestState && latestState.charsetSamples && latestState.charsetSamples[name]) || '';
+      item.querySelector('.bytes').textContent = (CHARSET_HINTS[name] || '') + (hint ? '　' + hint : '');
+    }
+    item.onclick = function (evt) {
+      evt.stopPropagation();
+      if (isCur) { hideCharsetPop(); return; }
+      if (wsSend({ cmd: 'set-charset', charset: name })) {
+        appendLog('sys', '界面', '切换下发编码: ' + current + ' -> ' + name);
+        hideCharsetPop();
+      }
+    };
+    pop.appendChild(item);
+  });
+
+  const foot = document.createElement('div');
+  foot.className = 'pop-foot';
+  foot.textContent = '切换立即生效（已连接的设备无需重连），并自动保存，重启后保持。';
+  pop.appendChild(foot);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function showCharsetPop() {
+  renderCharsetPop();
+  const pop = $('charsetPop');
+  const btn = $('charsetBtn');
+  const rect = btn.getBoundingClientRect();
+  pop.classList.add('show');
+  // 右对齐到按钮，避免超出窗口
+  const width = pop.offsetWidth;
+  let left = rect.right - width;
+  if (left < 8) left = 8;
+  pop.style.top = (rect.bottom + 6) + 'px';
+  pop.style.left = left + 'px';
+}
+
+function hideCharsetPop() {
+  $('charsetPop').classList.remove('show');
+}
+
+$('charsetBtn').onclick = function (evt) {
+  evt.stopPropagation();
+  if ($('charsetPop').classList.contains('show')) hideCharsetPop();
+  else showCharsetPop();
+};
+
+document.addEventListener('click', function (evt) {
+  const pop = $('charsetPop');
+  if (!pop.classList.contains('show')) return;
+  if (pop.contains(evt.target) || $('charsetBtn').contains(evt.target)) return;
+  hideCharsetPop();
+});
+window.addEventListener('resize', hideCharsetPop);
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') hideCharsetPop();
+});
+
+/* 每 2 秒刷新“已连接时长 / 最近数据时间”，无需等服务端推送 */
+setInterval(function () {
+  if (latestState) renderState(localizeState(latestState));
+}, 2000);
+
+/* 服务端超过 8 秒没推送状态 -> 视为断线 */
+setInterval(function () {
+  if (lastStateAt && serverOnline && Date.now() - lastStateAt > 8000) {
+    setServerStatus(false, '服务端无响应');
+  }
+}, 3000);
+
+/** 用本地时间重算时长类字段，让界面上的秒数平滑走动。 */
+function localizeState(state) {
+  const now = Date.now();
+  const devices = (state.devices || []).map(function (d) {
+    return Object.assign({}, d, {
+      connectedSeconds: Math.max(0, Math.floor((now - d.connectedAt) / 1000)),
+      idleMillis: Math.max(0, now - d.lastSeenAt)
+    });
+  });
+  return Object.assign({}, state, { devices: devices });
+}
+
+/* 启动 */
+renderGrid();
+renderSwatches();
+connect();
+appendLog('sys', '界面', '控制台已就绪，等待服务端与设备连接…');
+</script>
+</body>
+</html>
