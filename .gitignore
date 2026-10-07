@@ -4,3 +4,4 @@ __pycache__/
 esp8266-console.properties
 .idea/
 *.iml
+release/

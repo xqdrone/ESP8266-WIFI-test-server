@@ -42,7 +42,13 @@ public class DeviceConnection {
 
     private final AtomicLong receivedCount = new AtomicLong();
     private final AtomicLong sentCount = new AtomicLong();
+    /** 被静默（心跳）规则拦下的条数：只保活，不进日志/历史，也不计入 receivedCount。 */
+    private final AtomicLong quietCount = new AtomicLong();
     private volatile long lastSeenAt = System.currentTimeMillis();
+    /** 最近一条“业务数据”的时间；心跳不会刷新它，界面的“最近数据”看的就是这个。 */
+    private volatile long lastDataAt = System.currentTimeMillis();
+    /** 最近一条被静默报文的时间，0 表示还没收到过。 */
+    private volatile long lastQuietAt = 0L;
     private volatile String name;
 
     private final Deque<String> history = new ArrayDeque<>();
@@ -109,16 +115,32 @@ public class DeviceConnection {
         return reader.readLine();
     }
 
-    /** 收到一条消息后调用，刷新活跃时间、计数并记录历史。 */
+    /** 收到一条“业务数据”后调用，刷新活跃时间、计数并记录历史。 */
     public void touchReceived(String line) {
         receivedCount.incrementAndGet();
-        lastSeenAt = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        lastSeenAt = now;
+        lastDataAt = now;
         synchronized (history) {
             history.addLast(line);
             while (history.size() > maxHistory) {
                 history.removeFirst();
             }
         }
+    }
+
+    /**
+     * 收到一条命中静默（心跳）规则的上报后调用。
+     *
+     * <p>关键点：仍然刷新 {@link #lastSeenAt}，否则 {@code DeviceHub.checkHeartbeats()}
+     * 会在超时后把设备判定为离线并断开。差别只在于它不计入数据条数、不进历史，
+     * 因此不会出现在浏览器数据日志和控制台里。</p>
+     */
+    public void touchQuiet() {
+        long now = System.currentTimeMillis();
+        lastSeenAt = now;
+        lastQuietAt = now;
+        quietCount.incrementAndGet();
     }
 
     /**
@@ -183,6 +205,13 @@ public class DeviceConnection {
         map.put("connectedSeconds", Math.max(0L, (now - connectedAt) / 1000L));
         map.put("lastSeenAt", lastSeenAt);
         map.put("idleMillis", Math.max(0L, now - lastSeenAt));
+        map.put("lastDataAt", lastDataAt);
+        // 界面上的“最近数据”用这个：被静默的心跳不算数据
+        map.put("dataIdleMillis", Math.max(0L, now - lastDataAt));
+        map.put("quietCount", quietCount.get());
+        map.put("lastQuietAt", lastQuietAt);
+        // -1 表示这次连接还没收到过心跳
+        map.put("quietIdleMillis", lastQuietAt > 0L ? Math.max(0L, now - lastQuietAt) : -1L);
         map.put("received", receivedCount.get());
         map.put("sent", sentCount.get());
         map.put("history", snapshotHistory());

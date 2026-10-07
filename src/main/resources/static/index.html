@@ -467,6 +467,10 @@ function handleMessage(msg) {
   if (msg.type === 'state') {
     latestState = msg.payload;
     lastStateAt = msg.at;
+    /* 服务端只在“有变化”时推送（设备空闲时可能十几秒没有一次），
+       所以只要收到推送就说明服务端是活的，必须把状态恢复成“已连接”。
+       否则一旦被判超时，文字会永久停在“服务端无响应”。 */
+    if (!serverOnline) setServerStatus(true, '服务端已连接');
     renderState(msg.payload);
   } else if (msg.type === 'device-message') {
     const p = msg.payload;
@@ -541,6 +545,8 @@ function renderDevices(devices) {
           '<div>收到 <b class="m-rx"></b></div>' +
           '<div>下发 <b class="m-tx"></b></div>' +
           '<div>最近数据 <b class="m-idle"></b></div>' +
+          '<div title="命中 app.quiet-patterns 的保活报文（例如 Heart Beat Test）只用于保活，' +
+            '不会出现在上方的数据日志里">心跳 <b class="m-hb"></b></div>' +
         '</div>';
       el.querySelector('.devid').textContent = d.id;
       el.querySelector('.m-remote').textContent = d.remote;
@@ -565,7 +571,16 @@ function renderDevices(devices) {
     el.querySelector('.m-dur').textContent = humanDuration(d.connectedSeconds);
     el.querySelector('.m-rx').textContent = d.received + ' 条';
     el.querySelector('.m-tx').textContent = d.sent + ' 条';
-    el.querySelector('.m-idle').textContent = Math.round(d.idleMillis / 1000) + 's 前';
+    // “最近数据”只反映真实业务数据：被静默的心跳不刷新它
+    el.querySelector('.m-idle').textContent =
+      Math.round((d.dataIdleMillis != null ? d.dataIdleMillis : d.idleMillis) / 1000) + 's 前';
+    // 心跳单独显示，这样即使日志里看不到，也能确认链路还活着
+    const hb = el.querySelector('.m-hb');
+    if (d.quietCount > 0 && d.quietIdleMillis >= 0) {
+      hb.textContent = Math.round(d.quietIdleMillis / 1000) + 's 前（共 ' + d.quietCount + ' 次）';
+    } else {
+      hb.textContent = '—';
+    }
   });
 }
 
@@ -841,9 +856,11 @@ setInterval(function () {
   if (latestState) renderState(localizeState(latestState));
 }, 2000);
 
-/* 服务端超过 8 秒没推送状态 -> 视为断线 */
+/* 服务端超过 30 秒没推送状态 -> 视为断线。
+   阈值必须明显大于设备心跳周期（当前 10 秒），否则设备安静时会被误判；
+   另外标签页切到后台后浏览器会把定时器节流到约 1 次/分钟，也需要留足余量。 */
 setInterval(function () {
-  if (lastStateAt && serverOnline && Date.now() - lastStateAt > 8000) {
+  if (lastStateAt && serverOnline && Date.now() - lastStateAt > 30000) {
     setServerStatus(false, '服务端无响应');
   }
 }, 3000);
@@ -854,7 +871,11 @@ function localizeState(state) {
   const devices = (state.devices || []).map(function (d) {
     return Object.assign({}, d, {
       connectedSeconds: Math.max(0, Math.floor((now - d.connectedAt) / 1000)),
-      idleMillis: Math.max(0, now - d.lastSeenAt)
+      idleMillis: Math.max(0, now - d.lastSeenAt),
+      // “最近数据”只看真实业务数据，被静默的心跳不算
+      dataIdleMillis: Math.max(0, now - (d.lastDataAt || d.lastSeenAt)),
+      // -1 表示这次连接还没收到过心跳
+      quietIdleMillis: d.lastQuietAt ? Math.max(0, now - d.lastQuietAt) : -1
     });
   });
   return Object.assign({}, state, { devices: devices });

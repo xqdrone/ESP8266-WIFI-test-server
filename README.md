@@ -369,12 +369,49 @@ AT+CIPSEND=<n>                       // 先报长度，收到 '>' 后再发 n �
 | `app.charset-config-file` | `esp8266-console.properties` | 界面切换编码后保存到的文件；删掉它即恢复上面的默认值 |
 | `app.receive-charset` | `UTF-8` | 解码**单片机上报**数据用的编码；上报中文乱码时设为 `GBK` |
 | `app.hex-dump-on-send` | `false` | 下发时打印十六进制字节，排查编码问题用 |
+| `app.quiet-patterns` | `(?i)heart[ _-]?beat` | **心跳静默规则**（正则列表，逗号分隔）。命中的上报只保活，不进数据日志/历史/控制台 |
+| `app.quiet-echo-to-console` | `false` | 静默报文是否也打印到控制台（排查"心跳有没有收到"时临时开） |
 
 启动时也可以用 `-D` 覆盖，`run.bat` 顶部就提供了 `WEB_PORT` / `TCP_PORT` / `HEARTBEAT_MS` 三个变量：
 
 ```bash
 java -jar target/esp8266-tcp-server.jar -Dapp.tcp.port=9100 -Dserver.port=8090
 ```
+
+### 6.1 心跳静默（`app.quiet-patterns`）
+
+单片机一般每 10 秒发一次心跳。如果照原样进日志，**真正的数据会被心跳淹没**。
+默认规则把心跳"藏"起来，但**保留它保活的作用**——这一点很关键，否则设备会被
+`app.heartbeat-timeout-millis` 判离线并断开。
+
+| 行为 | 心跳报文 | 真实数据 |
+| --- | --- | --- |
+| 刷新在线状态（不会被判离线/踢掉） | ✅ | ✅ |
+| 出现在浏览器「数据日志」 | ❌ 隐藏 | ✅ |
+| 打印到服务端控制台 | ❌ 隐藏 | ✅ |
+| 计入卡片「收到 N 条」 | ❌ | ✅ |
+| 刷新卡片「最近数据」 | ❌ | ✅ |
+| 刷新卡片「心跳 N 次 / 最近心跳」 | ✅ | ❌ |
+
+```properties
+# 换一种心跳
+app.quiet-patterns=^PING$
+
+# 同时屏蔽多种保活报文
+app.quiet-patterns=(?i)heart[ _-]?beat,^PING$,^KEEPALIVE
+
+# 全部显示，不屏蔽任何东西
+app.quiet-patterns=
+```
+
+几个要点：
+
+- 匹配方式是**「包含」而非「整行相等」**，所以 `heart[ _-]?beat` 能命中 `Heart Beat Test`；
+- 每一项都是 Java 正则，写在 `.properties` 里**反斜杠要写两个**（`\\s` 才表示 `\s`），
+  所以默认规则刻意不用反斜杠；
+- 单项之间用英文逗号分隔；**空白项会被跳过**，非法正则会告警并被忽略；
+- 留空 = 完全关闭该功能，所有上报都会显示；
+- 匹配发生在按 `app.receive-charset` 解码**之后**，所以中文心跳要保证接收字符集配置正确。
 
 ---
 
@@ -455,6 +492,9 @@ esp8266-tcp-server/
 | 端口被占用启动失败 | 改 `app.tcp.port` / `server.port`，启动日志会打印具体错误 |
 | 设备刚连上就掉线 | 单片机建连后 20 秒内没有发数据（`app.tcp.handshake-timeout-millis`） |
 | 设备显示「超时/离线」 | 单片机没有定时发心跳，或 `app.heartbeat-timeout-millis` 设得太小 |
+| 日志里看不到心跳 | **这是正常的**：被 `app.quiet-patterns` 静默了。看设备卡片的「心跳」行确认保活正常，或把该配置留空（见 6.1） |
+| 静默配置写错了会怎样 | 空白项被跳过、非法正则只告警不生效，**不会**把所有数据吞掉；启动日志会打印实际启用的规则 |
+| 界面一直显示「服务端无响应」 | 服务端只在**有变化**时推送状态，设备空闲十几秒属正常；本版本已修复该误判（收到推送即恢复「已连接」，阈值放宽到 30 秒），请确保页面已刷新 |
 | 单片机收到乱码 | ESP8266 侧按行读取（`readStringUntil('\n')`），并确保波特率一致 |
 | **发中文显示乱码** | **先看第 4 节**：把 `app.send-charset` 改成 `GBK`；用 `-Dapp.hex-dump-on-send=true` 看实际字节 |
 | 点击按钮无反应 | 顶栏「下发目标」选的设备已离线；日志区会提示「当前没有在线设备」 |

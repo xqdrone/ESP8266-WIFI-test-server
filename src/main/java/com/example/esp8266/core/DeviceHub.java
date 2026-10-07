@@ -37,6 +37,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * 核心枢纽：
@@ -58,6 +60,8 @@ public class DeviceHub {
 
     private final AppProperties properties;
     private final Map<String, DeviceConnection> devices = new ConcurrentHashMap<>();
+    /** 编译好的静默（心跳）规则；为空表示不做任何静默，全部显示。 */
+    private final List<Pattern> quietPatterns = new ArrayList<>();
     private final Map<String, WebSocketSession> browsers = new ConcurrentHashMap<>();
     private final AtomicLong idSeq = new AtomicLong();
     private final AtomicReference<String> lastError = new AtomicReference<>();
@@ -96,6 +100,7 @@ public class DeviceHub {
     @PostConstruct
     public void start() {
         resolveSendCharset();
+        resolveQuietPatterns();
 
         // 接收字符集：单片机上报中文乱码时改成 GBK
         Charset parsedReceive = tryCharset(properties.getReceiveCharset());
@@ -346,6 +351,53 @@ public class DeviceHub {
         }
     }
 
+    // ------------------------------------------------------- 静默（心跳）过滤
+
+    /**
+     * 编译 {@code app.quiet-patterns}。
+     *
+     * <p>空字符串项和非法正则会跳过并告警——这一点很重要：如果把空串当成正则，
+     * 空正则能匹配任意字符串，会把所有上报全部吞掉，那就再也看不到数据了。</p>
+     */
+    private void resolveQuietPatterns() {
+        quietPatterns.clear();
+        List<String> raw = properties.getQuietPatterns();
+        if (raw != null) {
+            for (String item : raw) {
+                if (item == null || item.trim().isEmpty()) {
+                    continue;
+                }
+                try {
+                    quietPatterns.add(Pattern.compile(item.trim()));
+                } catch (PatternSyntaxException e) {
+                    log.warn("app.quiet-patterns 里的 \"{}\" 不是合法正则，已忽略: {}", item, e.getDescription());
+                }
+            }
+        }
+        if (quietPatterns.isEmpty()) {
+            log.info("静默（心跳）过滤未启用：所有上报都会显示在界面数据日志里");
+        } else {
+            StringBuilder sb = new StringBuilder();
+            for (Pattern pattern : quietPatterns) {
+                if (sb.length() > 0) {
+                    sb.append(" | ");
+                }
+                sb.append(pattern.pattern());
+            }
+            log.info("静默（心跳）过滤已启用: {} —— 命中的报文只保活，不显示在数据日志里", sb);
+        }
+    }
+
+    /** 该行是否属于“静默报文”（心跳之类只用于保活的报文）。 */
+    private boolean isQuiet(String line) {
+        for (Pattern pattern : quietPatterns) {
+            if (pattern.matcher(line).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void readLoop(DeviceConnection connection) {
         boolean firstLine = true;
         try {
@@ -364,14 +416,22 @@ public class DeviceHub {
                 if (cleaned.isEmpty()) {
                     continue;
                 }
-                connection.touchReceived(cleaned);
-                if (properties.isEchoToConsole()) {
-                    log.info("[{}] <- {}", connection.getId(), DeviceConnection.preview(cleaned));
+                if (isQuiet(cleaned)) {
+                    // 静默报文：只保活 + 记账，不进数据日志、不进历史、不进控制台
+                    connection.touchQuiet();
+                    if (properties.isQuietEchoToConsole()) {
+                        log.info("[{}] <- [静默] {}", connection.getId(), DeviceConnection.preview(cleaned));
+                    }
+                } else {
+                    connection.touchReceived(cleaned);
+                    if (properties.isEchoToConsole()) {
+                        log.info("[{}] <- {}", connection.getId(), DeviceConnection.preview(cleaned));
+                    }
+                    broadcast("device-message", orderedMap(
+                            "deviceId", connection.getId(),
+                            "data", cleaned,
+                            "at", System.currentTimeMillis()));
                 }
-                broadcast("device-message", orderedMap(
-                        "deviceId", connection.getId(),
-                        "data", cleaned,
-                        "at", System.currentTimeMillis()));
                 broadcastState();
             }
         } catch (SocketTimeoutException e) {

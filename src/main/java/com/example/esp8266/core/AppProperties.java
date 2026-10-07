@@ -3,6 +3,10 @@ package com.example.esp8266.core;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * 可通过 application.properties 覆盖的配置项（前缀 app.）。
  */
@@ -23,6 +27,23 @@ public class AppProperties {
 
     /** 是否把收到的数据同时打印到控制台。 */
     private boolean echoToConsole = true;
+
+    /**
+     * 静默（心跳）匹配规则列表，每一项都是一个正则表达式，对收到的整行做“包含匹配”。
+     *
+     * <p>命中的上报只用于 <b>保活</b>：照样刷新在线状态、照样阻止心跳超时断开，
+     * 但不进入浏览器数据日志、不进入设备历史，也不打印到控制台，也就是在界面上“隐身”。
+     * 单片机定时发的 {@code Heart Beat Test} 就属于这一类。</p>
+     *
+     * <p>想让所有数据都显示出来，把本项留空即可：{@code app.quiet-patterns=}</p>
+     *
+     * <p>注意：写进 .properties 文件时反斜杠要写成两个（{@code \\s}），
+     * 所以默认规则刻意不含反斜杠。</p>
+     */
+    private List<String> quietPatterns = new ArrayList<>(Arrays.asList("(?i)heart[ _-]?beat"));
+
+    /** 静默报文是否也打印到服务端控制台。默认 false，保持安静。 */
+    private boolean quietEchoToConsole = false;
 
     /**
      * 向单片机发送数据时使用的字符集，默认 UTF-8。
@@ -120,6 +141,22 @@ public class AppProperties {
 
     public void setEchoToConsole(boolean echoToConsole) {
         this.echoToConsole = echoToConsole;
+    }
+
+    public List<String> getQuietPatterns() {
+        return quietPatterns;
+    }
+
+    public void setQuietPatterns(List<String> quietPatterns) {
+        this.quietPatterns = quietPatterns;
+    }
+
+    public boolean isQuietEchoToConsole() {
+        return quietEchoToConsole;
+    }
+
+    public void setQuietEchoToConsole(boolean quietEchoToConsole) {
+        this.quietEchoToConsole = quietEchoToConsole;
     }
 
     public String getSendCharset() {
